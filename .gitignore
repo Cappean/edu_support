@@ -161,3 +161,14 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Local runtime and secrets
+.env.*
+!.env.example
+node_modules/
+.pnpm-store/
+.ruff_cache/
+*.tsbuildinfo
+.runtime/
+playwright-report/
+test-results/

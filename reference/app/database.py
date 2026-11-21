@@ -8,12 +8,35 @@ from typing import Any, cast
 
 import pymysql
 from pymysql.cursors import DictCursor
+from sqlalchemy import create_engine
+from sqlalchemy.engine import URL
 
 from .config import DB_CONFIG
 
+_engine = create_engine(
+    URL.create(
+        "mysql+pymysql",
+        username=DB_CONFIG["user"],
+        password=DB_CONFIG["password"],
+        host=DB_CONFIG["host"],
+        port=DB_CONFIG["port"],
+        database=DB_CONFIG["database"],
+    ),
+    pool_size=8,
+    max_overflow=8,
+    pool_pre_ping=True,
+    pool_recycle=1800,
+    connect_args={
+        "charset": "utf8mb4",
+        "connect_timeout": 5,
+        "read_timeout": 20,
+        "write_timeout": 20,
+    },
+)
+
 
 def get_connection() -> pymysql.connections.Connection:
-    return pymysql.connect(**DB_CONFIG)
+    return _engine.raw_connection()
 
 
 @contextmanager
@@ -53,4 +76,3 @@ def executemany(sql: str, params: Iterable[tuple[Any, ...]]) -> int:
     with db_cursor() as (_, cursor):
         affected = cursor.executemany(sql, params)
         return 0 if affected is None else int(affected)
-

@@ -30,7 +30,9 @@ def ensure_cohort_rel(
     return row
 
 
-def counts(row: dict[str, Any] | None, total: str, first: str, second: str) -> dict[str, int]:
+def counts(
+    row: dict[str, Any] | None, total: str, first: str, second: str
+) -> dict[str, int]:
     data = row or {}
     return {
         "totalSessions": int(data.get(total) or 0),
@@ -47,7 +49,9 @@ def list_my_cohorts(
         Query(description="履约状态。可选值：active、completed、cancelled、refunded。"),
     ] = None,
     page_no: Annotated[int, Query(alias="pageNo", description="页码，从 1 开始。")] = 1,
-    page_size: Annotated[int, Query(alias="pageSize", description="每页条数，范围 1 到 100。")] = 20,
+    page_size: Annotated[
+        int, Query(alias="pageSize", description="每页条数，范围 1 到 100。")
+    ] = 20,
 ):
     offset, limit = offset_limit(page_no, page_size)
     conditions = ["rel.user_id = %s"]
@@ -182,45 +186,57 @@ def get_my_cohort_progress(
     video = fetch_one(
         """
         SELECT
-            COUNT(DISTINCT play.video_id) AS total_videos,
-            SUM(play.completed_flag = 1) AS completed_videos,
+            COUNT(DISTINCT video.id) AS total_videos,
+            COUNT(DISTINCT CASE WHEN play.completed_flag = 1 THEN video.id END) AS completed_videos,
             COALESCE(SUM(play.watched_seconds), 0) AS watched_seconds
-        FROM session_video_play AS play
-        JOIN session_video AS video ON video.id = play.video_id
+        FROM session_video AS video
+        LEFT JOIN session_video_play AS play ON video.id = play.video_id AND play.student_id = %s
         JOIN session_asset AS asset ON asset.id = video.asset_id
         JOIN series_cohort_session AS session ON session.id = asset.session_id
         JOIN series_cohort_course AS course ON course.id = session.series_cohort_course_id
-        WHERE course.cohort_id = %s AND play.student_id = %s
+        WHERE course.cohort_id = %s
         """,
-        (cohort_id, student_id),
+        (student_id, cohort_id),
     )
     homework = fetch_one(
         """
         SELECT
-            COUNT(*) AS total_homeworks,
+            COUNT(DISTINCT hw.id) AS total_homeworks,
             SUM(submit_status = 'submitted') AS submitted_count,
             SUM(correction_status = 'corrected') AS corrected_count,
             SUM(submit_status = 'expired_unsubmitted') AS expired_unsubmitted_count
-        FROM session_homework_submission AS sub
-        JOIN session_homework AS hw ON hw.id = sub.homework_id
+        FROM session_homework AS hw
+        LEFT JOIN session_homework_submission AS sub ON hw.id = sub.homework_id AND sub.student_id = %s
         JOIN series_cohort_session AS session ON session.id = hw.session_id
         JOIN series_cohort_course AS course ON course.id = session.series_cohort_course_id
-        WHERE course.cohort_id = %s AND sub.student_id = %s
+        WHERE course.cohort_id = %s
         """,
-        (cohort_id, student_id),
+        (student_id, cohort_id),
     )
     exam = fetch_one(
         """
         SELECT
-            COUNT(*) AS total_exams,
+            COUNT(DISTINCT exam.id) AS total_exams,
             SUM(attempt_status = 'submitted') AS submitted_count,
             SUM(attempt_status = 'absent') AS absent_count
-        FROM session_exam_submission AS sub
-        JOIN session_exam AS exam ON exam.id = sub.exam_id
+        FROM session_exam AS exam
+        LEFT JOIN session_exam_submission AS sub ON exam.id = sub.exam_id AND sub.student_id = %s
         JOIN series_cohort_session AS session ON session.id = exam.session_id
         JOIN series_cohort_course AS course ON course.id = session.series_cohort_course_id
-        WHERE course.cohort_id = %s AND sub.student_id = %s
+        WHERE course.cohort_id = %s
         """,
+        (student_id, cohort_id),
+    )
+    scores = fetch_all(
+        """SELECT exam.id AS examId,exam.exam_name AS examName,
+            exam.total_score AS totalScore,sub.score_value AS score,
+            sub.attempt_status AS status
+        FROM session_exam_submission sub
+        JOIN session_exam exam ON exam.id=sub.exam_id
+        JOIN series_cohort_session session ON session.id=exam.session_id
+        JOIN series_cohort_course course ON course.id=session.series_cohort_course_id
+        WHERE course.cohort_id=%s AND sub.student_id=%s
+        ORDER BY exam.id LIMIT 100""",
         (cohort_id, student_id),
     )
     return ok(
@@ -246,6 +262,7 @@ def get_my_cohort_progress(
                 "totalExams": int((exam or {}).get("total_exams") or 0),
                 "submittedCount": int((exam or {}).get("submitted_count") or 0),
                 "absentCount": int((exam or {}).get("absent_count") or 0),
+                "scores": scores,
             },
         }
     )

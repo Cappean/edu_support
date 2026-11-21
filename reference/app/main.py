@@ -21,6 +21,10 @@ from .routers.payments import router as payments_router
 from .routers.study import router as study_router
 from .routers.tickets import router as tickets_router
 from .routers.users import router as users_router
+from .support_security import service_secret
+from .support import router as support_router, migrate
+from contextlib import asynccontextmanager
+import secrets
 
 OPENAPI_TAGS = [
     {"name": "users", "description": "1. 用户信息与学习档案查询"},
@@ -37,7 +41,31 @@ OPENAPI_TAGS = [
     {"name": "tickets", "description": "12. 工单与售后服务"},
 ]
 
-app = FastAPI(title="Edu Data API", version="0.1.0", openapi_tags=OPENAPI_TAGS)
+
+@asynccontextmanager
+async def lifespan(app):
+    migrate()
+    yield
+
+
+app = FastAPI(
+    title="Edu Data API", version="0.1.0", openapi_tags=OPENAPI_TAGS, lifespan=lifespan
+)
+app.include_router(support_router)
+
+
+@app.middleware("http")
+async def require_service(request: Request, call_next):
+    if request.url.path not in {"/health", "/live"}:
+        if not secrets.compare_digest(
+            request.headers.get("X-Service-Key", ""), service_secret()
+        ):
+            return JSONResponse(
+                status_code=401,
+                content=fail("SERVICE_AUTH_REQUIRED", "仅允许可信服务访问"),
+            )
+    return await call_next(request)
+
 
 app.include_router(users_router)
 app.include_router(courses_router)
@@ -78,6 +106,9 @@ async def handle_value_error(_: Request, exc: ValueError) -> JSONResponse:
 
 @app.get("/health")
 def health() -> dict[str, object]:
+    from .database import fetch_one
+
+    fetch_one("SELECT 1 AS ready")
     return {"code": 0, "message": "ok", "data": {"status": "ok"}}
 
 
